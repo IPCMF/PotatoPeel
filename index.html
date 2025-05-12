@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Potato Peeler Tracker</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f4f4;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        #app-container {
+            background-color: #fff;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.1);
+            width: 90%;
+            max-width: 600px;
+        }
+
+        h1 {
+            text-align: center;
+            color: #5a3e2b; /* Potato-ish brown */
+            margin-bottom: 20px;
+        }
+
+        .controls, .displays {
+            margin-bottom: 20px;
+        }
+
+        .controls button {
+            background-color: #795548; /* Darker brown */
+            color: white;
+            border: none;
+            padding: 12px 18px;
+            margin: 5px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s ease;
+            min-width: 150px; /* Ensure buttons have a decent width */
+        }
+
+        .controls button:hover:not(:disabled) {
+            background-color: #5d4037; /* Even darker on hover */
+        }
+
+        .controls button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+
+        #resetButton {
+            background-color: #d32f2f; /* Red for reset */
+        }
+        #resetButton:hover:not(:disabled) {
+            background-color: #c62828;
+        }
+
+        .display-item {
+            background-color: #efebe9; /* Light beige */
+            padding: 10px;
+            margin-bottom: 8px;
+            border-radius: 4px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .display-item span:first-child {
+            font-weight: bold;
+            color: #4e342e; /* Dark brown text */
+        }
+
+        .display-item span:last-child {
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 1.1em;
+            color: #3e2723;
+        }
+
+        #timerDisplayValue {
+            font-size: 1.5em;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="app-container">
+        <h1>Potato Peeling Tracker</h1>
+
+        <div class="controls">
+            <button id="peelButton">Peel Potato (+1)</button>
+            <button id="bucketButton">Finish Bucket (+1)</button>
+            <button id="pauseButton">Pause</button>
+            <button id="resetButton">Reset All</button>
+        </div>
+
+        <div class="displays">
+            <div class="display-item">
+                <span>Total Time Elapsed:</span>
+                <span id="timerDisplayValue">00:00:00</span>
+            </div>
+            <div class="display-item">
+                <span>Potatoes Peeled:</span>
+                <span id="totalPotatoesDisplay">0</span>
+            </div>
+            <div class="display-item">
+                <span>Avg. Time per Potato:</span>
+                <span id="avgTimePerPotatoDisplay">N/A</span>
+            </div>
+            <div class="display-item">
+                <span>Finished Buckets:</span>
+                <span id="totalBucketsDisplay">0</span>
+            </div>
+             <div class="display-item">
+                <span>Avg. Potatoes per Bucket:</span>
+                <span id="avgPotatoesPerBucketDisplay">N/A</span>
+            </div>
+            <div class="display-item">
+                <span>Avg. Time per Bucket:</span>
+                <span id="avgTimePerBucketDisplay">N/A</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- STATE VARIABLES ---
+        let totalPotatoes = 0;
+        let totalBuckets = 0;
+        let currentPotatoesInBucket = 0; // Potatoes for the current bucket being filled
+
+        let potatoTimes = []; // Stores milliseconds for each potato
+        let bucketTimes = []; // Stores milliseconds for each bucket completion
+        let potatoesPerFinishedBucket = []; // Stores potato count for each finished bucket
+
+        let elapsedTimeInSeconds = 0;
+        let timerInterval = null;
+        let isPaused = false;
+
+        let lastPeelTimestamp = null; // Timestamp of the last potato peel action or timer start
+        let lastBucketTimestamp = null; // Timestamp of the last bucket finish action or timer start
+
+        // --- DOM ELEMENTS ---
+        const peelButton = document.getElementById('peelButton');
+        const bucketButton = document.getElementById('bucketButton');
+        const pauseButton = document.getElementById('pauseButton');
+        const resetButton = document.getElementById('resetButton');
+
+        const timerDisplay = document.getElementById('timerDisplayValue');
+        const totalPotatoesDisplay = document.getElementById('totalPotatoesDisplay');
+        const avgTimePerPotatoDisplay = document.getElementById('avgTimePerPotatoDisplay');
+        const totalBucketsDisplay = document.getElementById('totalBucketsDisplay');
+        const avgPotatoesPerBucketDisplay = document.getElementById('avgPotatoesPerBucketDisplay');
+        const avgTimePerBucketDisplay = document.getElementById('avgTimePerBucketDisplay');
+
+        // --- HELPER FUNCTIONS ---
+        function formatTime(totalSeconds) {
+            const hours = Math.floor(totalSeconds / 3600);
+            const minutes = Math.floor((totalSeconds % 3600) / 60);
+            const seconds = totalSeconds % 60;
+            return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+        }
+
+        function formatAvgTime(ms) {
+            if (isNaN(ms) || ms === 0) return "N/A";
+            const seconds = (ms / 1000).toFixed(2);
+            if (seconds < 60) {
+                return `${seconds}s`;
+            }
+            const minutes = Math.floor(seconds / 60);
+            const remainingSeconds = (seconds % 60).toFixed(2);
+            return `${minutes}m ${remainingSeconds}s`;
+        }
+
+        function updateDisplays() {
+            totalPotatoesDisplay.textContent = totalPotatoes;
+            totalBucketsDisplay.textContent = totalBuckets;
+
+            if (potatoTimes.length > 0) {
+                const avgPotatoMs = potatoTimes.reduce((sum, t) => sum + t, 0) / potatoTimes.length;
+                avgTimePerPotatoDisplay.textContent = formatAvgTime(avgPotatoMs);
+            } else {
+                avgTimePerPotatoDisplay.textContent = "N/A";
+            }
+
+            if (bucketTimes.length > 0) {
+                const avgBucketMs = bucketTimes.reduce((sum, t) => sum + t, 0) / bucketTimes.length;
+                avgTimePerBucketDisplay.textContent = formatAvgTime(avgBucketMs);
+            } else {
+                avgTimePerBucketDisplay.textContent = "N/A";
+            }
+
+            if (potatoesPerFinishedBucket.length > 0) {
+                const avgPpb = potatoesPerFinishedBucket.reduce((sum, p) => sum + p, 0) / potatoesPerFinishedBucket.length;
+                avgPotatoesPerBucketDisplay.textContent = avgPpb.toFixed(1);
+            } else {
+                avgPotatoesPerBucketDisplay.textContent = "N/A";
+            }
+        }
+
+        function toggleButtonStates(disable) {
+            peelButton.disabled = disable;
+            bucketButton.disabled = disable;
+            resetButton.disabled = disable; // Also disable reset when paused, re-enable when unpaused
+        }
+
+        // --- TIMER FUNCTIONS ---
+        function startMainTimer() {
+            if (timerInterval) clearInterval(timerInterval); // Clear existing if any
+            
+            // Initialize timestamps if this is the very first start or a restart after reset
+            if (lastPeelTimestamp === null) lastPeelTimestamp = Date.now();
+            if (lastBucketTimestamp === null) lastBucketTimestamp = Date.now();
+
+            timerInterval = setInterval(() => {
+                elapsedTimeInSeconds++;
+                timerDisplay.textContent = formatTime(elapsedTimeInSeconds);
+            }, 1000);
+            isPaused = false;
+            pauseButton.textContent = "Pause";
+            toggleButtonStates(false);
+        }
+
+        function pauseMainTimer() {
+            clearInterval(timerInterval);
+            timerInterval = null;
+            isPaused = true;
+            pauseButton.textContent = "Unpause";
+            toggleButtonStates(true);
+        }
+
+        // --- EVENT HANDLERS ---
+        peelButton.addEventListener('click', () => {
+            if (isPaused) return;
+
+            const now = Date.now();
+            if (lastPeelTimestamp !== null) { // Ensure timer has started
+                const timeForThisPotato = now - lastPeelTimestamp;
+                potatoTimes.push(timeForThisPotato);
+            }
+            lastPeelTimestamp = now; // Update for the next potato
+
+            totalPotatoes++;
+            currentPotatoesInBucket++;
+            updateDisplays();
+        });
+
+        bucketButton.addEventListener('click', () => {
+            if (isPaused) return;
+
+            const now = Date.now();
+            if (lastBucketTimestamp !== null) { // Ensure timer has started
+                const timeForThisBucket = now - lastBucketTimestamp;
+                bucketTimes.push(timeForThisBucket);
+            }
+            lastBucketTimestamp = now; // Update for the next bucket
+
+            totalBuckets++;
+            potatoesPerFinishedBucket.push(currentPotatoesInBucket);
+            currentPotatoesInBucket = 0; // Reset for the new bucket
+            updateDisplays();
+        });
+
+        pauseButton.addEventListener('click', () => {
+            if (isPaused) {
+                // If resuming, we need to effectively "catch up" the lastPeel/Bucket timestamps
+                // so the *next* peel/bucket isn't timed from before the pause.
+                lastPeelTimestamp = Date.now();
+                lastBucketTimestamp = Date.now();
+                startMainTimer();
+            } else {
+                pauseMainTimer();
+            }
+        });
+
+        resetButton.addEventListener('click', () => {
+            if (isPaused && pauseButton.textContent === "Unpause") { // Prevent reset if truly paused by user
+                 // Allow reset if paused only because of initial state before first start
+                if (elapsedTimeInSeconds === 0 && totalPotatoes === 0 && totalBuckets === 0) {
+                    // This is a fresh state, allow reset to re-confirm start
+                } else {
+                    alert("Please unpause before resetting.");
+                    return;
+                }
+            }
+            
+            if (confirm("Are you sure you want to reset everything? This will erase all counts and timers.")) {
+                if (timerInterval) clearInterval(timerInterval);
+                timerInterval = null;
+                
+                totalPotatoes = 0;
+                totalBuckets = 0;
+                currentPotatoesInBucket = 0;
+                potatoTimes = [];
+                bucketTimes = [];
+                potatoesPerFinishedBucket = [];
+                elapsedTimeInSeconds = 0;
+                
+                lastPeelTimestamp = null; 
+                lastBucketTimestamp = null;
+
+                isPaused = false; // Default to running state for a fresh start
+                pauseButton.textContent = "Pause"; 
+                // Buttons will be re-enabled by startMainTimer if it's called, or stay enabled.
+                // Or, more consistently:
+                toggleButtonStates(false); // Enable buttons for a fresh start
+
+
+                timerDisplay.textContent = formatTime(0);
+                updateDisplays();
+                // Optional: automatically start timer on reset, or require manual "unpause" (which would be start)
+                // For now, let's make it so they have to click "Unpause" (which is "Pause" initially after reset) or Peel/Bucket
+                // To make it cleaner, let's explicitly put it into a ready-to-start state:
+                pauseMainTimer(); // This sets up the "Unpause" button and disabled state.
+                                  // User then clicks "Unpause" to begin.
+                // However, the request was "reset the timer", implying it goes to 0 and is ready.
+                // Let's have it reset and be ready to go, starting the timer.
+                // To avoid immediate timing of 0ms for first potato if user clicks fast:
+                // startMainTimer(); // This will re-initialize timestamps correctly.
+                
+                // Let's refine: Reset should put it into a truly fresh state.
+                // Timer is not running, values are zero. Next action (peel/bucket or unpause) will start it.
+                isPaused = false; // Ready to run, but timer not ticking yet.
+                pauseButton.textContent = "Pause"; // It's not paused, but not running either.
+                                                // This button becomes the trigger to start.
+                                                // Or better:
+                // Set to a state where user MUST click "Unpause" to start everything
+                pauseMainTimer(); // This will set text to "Unpause", disable other buttons.
+                // And then when "Unpause" is clicked, it will call startMainTimer which initializes timestamps.
+            }
+        });
+
+        // --- INITIALIZATION ---
+        function initializeApp() {
+            updateDisplays();
+            timerDisplay.textContent = formatTime(0);
+            // Start in a paused state, requiring user to click "Unpause" to begin.
+            pauseMainTimer();
+        }
+
+        initializeApp();
+
+    </script>
+
+</body>
+</html>
